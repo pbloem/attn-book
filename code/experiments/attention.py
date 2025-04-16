@@ -306,11 +306,11 @@ def tune_go(trial : optuna.Trial):
 
     return res['accuracy']
 
-def tune(trials=100, name='unte-attention'):
+def tune(trials=100, name='tune-attention'):
 
     study = optuna.create_study(
         storage=f'sqlite:///db.sqlite3',  # Specify the storage URL here.
-        study_name=f'tune-all-2',
+        study_name=name,
         load_if_exists=True,
         direction="maximize",
     )
