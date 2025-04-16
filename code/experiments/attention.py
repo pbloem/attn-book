@@ -79,33 +79,48 @@ class EmbeddingModel(nn.Module):
     Optionallly includes a mixer (self-attention ) and a feedforward layer.
     """
 
-    def __init__(self, v, k, cls, mixer=None, ff=False):
+    def __init__(self, v, k, cls, mixer='simple', ff=False, layers=0, heads=4):
         super().__init__()
 
         self.embed = nn.Embedding(v, k)
         self.tocls = nn.Linear(k, cls)
 
-        self.mixer = mixer
+        ls = []
 
-        self.ff = nn.Sequential(
-            nn.Linear(k, 4*k), nn.ReLU(),
-            nn.Linear(4*k, k)
-        ) if ff else None
+        for _ in range(layers):
+            ls.append(make_mixer(mixer, k, heads))
 
+            if ff:
+                modff = nn.Sequential(
+                    nn.Linear(k, 4*k), nn.ReLU(),
+                    nn.Linear(4*k, k)
+                )
+                ls.append(modff)
+
+        self.layers = nn.Sequential(*ls)
 
     def forward(self, x, mask=None):
 
         x = self.embed(x)
 
-        x = x if self.mixer is None else x + self.mixer(x) # self-attention
-
-        x = self.ff(x) if self.ff is not None else x
+        x = self.layers(x)
 
         if mask is not None:
             x = x * mask
         x = x.mean(dim=1)
 
         return self.tocls(x)
+
+def make_mixer(mixer, emb=None, heads=None):
+    # Create model
+    if mixer == 'simple':
+        return SimpleSelfAttention()
+
+    if mixer == 'mh':
+        return MHSelfAttention(emb, heads=heads)
+
+    else:
+        raise
 
 def make_batches(x_data, y_data, pad_token, batch_tokens):
     """
@@ -143,7 +158,7 @@ def make_batches(x_data, y_data, pad_token, batch_tokens):
     assert sum(b[0].size(0) for b in batches) == len(x_data)
     return batches
 
-def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer=None, ff=False, heads=4):
+def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer='simple', layers=0, ff=False, heads=4):
 
     print('Loading data. ', end='')
     (x_train, y_train), (x_val, y_val), (i2w, w2i), cls = load_imdb(final=False, char=False)
@@ -153,15 +168,7 @@ def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer=None, ff=False, he
     train = make_batches(x_train, y_train, w2i['.pad'], batch_tokens)
     valid = make_batches(x_val, y_val, w2i['.pad'], batch_tokens)
 
-    # Create model
-    if mixer == 'simple':
-        mx = SimpleSelfAttention()
-    elif mixer == 'mh':
-        mx = MHSelfAttention(emb, heads=heads)
-    else:
-        mx = None
-
-    model = EmbeddingModel(v, emb, cls=cls, mixer=mx, ff=ff)
+    model = EmbeddingModel(v, emb, cls=cls, mixer=mixer, ff=ff, layers=layers)
     if torch.cuda.is_available(): model.cuda()
 
     opt = torch.optim.Adam(lr=lr, params=model.parameters())
@@ -199,7 +206,7 @@ def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer=None, ff=False, he
 
     return {'accuracy' : correct/num}
 
-def tune_go(trial : optuna.Trial, mixer):
+def tune_go(trial : optuna.Trial):
 
     res = go(
         epochs = 6,
@@ -208,27 +215,25 @@ def tune_go(trial : optuna.Trial, mixer):
         ff = trial.suggest_categorical('ff', [True, False]),
         batch_tokens = 50_000,
         heads = 4,
-        mixer = mixer
+        mixer = trial.suggest_categorical('mixer', ['simple', 'mh']),
+        layers = trial.suggest_categorical('layers', [0,1,2,3]),
     )
 
     return res['accuracy']
 
-def tune(mixers=['none', 'simple', 'mh'], trials=100):
+def tune(trials=100):
 
-    for mixer in mixers:
+    study = optuna.create_study(
+        storage=f'sqlite:///db.sqlite3',  # Specify the storage URL here.
+        study_name=f'tune-all',
+        load_if_exists=True,
+        direction="maximize",
+    )
 
-        print('Trial with mixer:', mixer)
-        study = optuna.create_study(
-            storage=f'sqlite:///db.sqlite3',  # Specify the storage URL here.
-            study_name=f'tune-{mixer}',
-            load_if_exists=True,
-            direction="maximize",
-        )
+    study.optimize(tune_go, n_trials=trials )
 
-        study.optimize(lambda x : tune_go(x, mixer), n_trials=trials )
-
-        print(f'Finished ({mixer}). Result:')
-        print('\t', study.best_params)
+    print(f'Finished. Result:')
+    print('\t', study.best_params)
 
 if __name__ == '__main__':
     fire.Fire()
