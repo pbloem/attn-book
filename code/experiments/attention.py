@@ -218,7 +218,7 @@ def make_batches(x_data, y_data, pad_token, batch_tokens):
     return batches
 
 def go(emb=300,
-       vocab=None,
+       vocab=20_000,
        epochs=3,
        batch_tokens=10_000,
        lr=3e-4, mixer='simple',
