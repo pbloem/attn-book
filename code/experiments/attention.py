@@ -13,7 +13,7 @@ from tqdm import tqdm
 import optuna
 
 BACKENDS = torch.cuda, torch.backends.mps
-
+MAX_LENGTH = 3000
 """
 Creates the basic models discussed in the first two chapters of the book:
 - An embedding model 
@@ -33,8 +33,6 @@ def attention(queries, keys, values):
 
     raw_weights = raw_weights / math.sqrt(k)
     weights = raw_weights.softmax(dim=-1)
-
-    # print(weights.size(), values.size()); exit()
 
     return weights @ values
     # -- In the book I have it the other way around. Is that better somehow?
@@ -68,7 +66,8 @@ class MHSelfAttention(nn.Module):
 
         res = attention(*kqv.split(s, dim=-1))
 
-        res = res.transpose(1,2).reshape(b, t, k)
+        res = res.transpose(1,2)
+        res = res.reshape(b, t, k)
 
         return self.unifyheads(res)
 
@@ -79,10 +78,12 @@ class EmbeddingModel(nn.Module):
     Optionallly includes a mixer (self-attention ) and a feedforward layer.
     """
 
-    def __init__(self, v, k, cls, mixer='simple', ff=False, layers=0, heads=4):
+    def __init__(self, v, k, cls, mixer='simple', ff=False, layers=0, heads=4, pos=False):
         super().__init__()
 
+
         self.embed = nn.Embedding(v, k)
+        self.pos = nn.Embedding(embedding_dim=k, num_embeddings=MAX_LENGTH) if pos else None
         self.tocls = nn.Linear(k, cls)
 
         ls = []
@@ -91,17 +92,22 @@ class EmbeddingModel(nn.Module):
             ls.append(make_mixer(mixer, k, heads))
 
             if ff:
-                modff = nn.Sequential(
+                ls.append(nn.Sequential(
                     nn.Linear(k, 4*k), nn.ReLU(),
                     nn.Linear(4*k, k)
-                )
-                ls.append(modff)
+                ))
 
         self.layers = nn.Sequential(*ls)
 
     def forward(self, x, mask=None):
 
         x = self.embed(x)
+
+        b, t, k = x.size()
+
+        if self.pos is not None:
+            pos = self.pos(torch.arange(t, device=x.device))[None, :, :].expand(b, t, k)
+            x = x + pos
 
         x = self.layers(x)
 
@@ -158,7 +164,7 @@ def make_batches(x_data, y_data, pad_token, batch_tokens):
     assert sum(b[0].size(0) for b in batches) == len(x_data)
     return batches
 
-def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer='simple', layers=0, ff=False, heads=4):
+def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer='simple', layers=0, ff=False, heads=4, pos=False):
 
     print('Loading data. ', end='')
     (x_train, y_train), (x_val, y_val), (i2w, w2i), cls = load_imdb(final=False, char=False)
@@ -168,7 +174,9 @@ def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer='simple', layers=0
     train = make_batches(x_train, y_train, w2i['.pad'], batch_tokens)
     valid = make_batches(x_val, y_val, w2i['.pad'], batch_tokens)
 
-    model = EmbeddingModel(v, emb, cls=cls, mixer=mixer, ff=ff, layers=layers)
+    model = EmbeddingModel(v, emb, cls=cls, mixer=mixer, ff=ff, layers=layers, heads=heads, pos=pos)
+    print(model)
+
     if torch.cuda.is_available(): model.cuda()
 
     opt = torch.optim.Adam(lr=lr, params=model.parameters())
@@ -213,6 +221,7 @@ def tune_go(trial : optuna.Trial):
         lr = trial.suggest_float('lr', 1e-5, 1e-1, log=True),
         emb = trial.suggest_categorical('emb', [16, 32, 64, 128, 256, 512]),
         ff = trial.suggest_categorical('ff', [True, False]),
+        pos = trial.suggest_categorical('pos', [True, False]),
         batch_tokens = 50_000,
         heads = 4,
         mixer = trial.suggest_categorical('mixer', ['simple', 'mh']),
