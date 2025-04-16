@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools >= 64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "attnbook"
+version = "0.0.1"
+dependencies = [
+        "numpy<2",
+        "matplotlib",
+        'tqdm',
+        'fire',
+        'torch',
+        'torchvision',
+        'wget'
+]
+requires-python = ">=3.10"
+authors = [
+  {name = "Peter Bloem", email = "attn@peterbloem.nl"},
+]
+maintainers = [
+  {name = "Peter Bloem", email = "attn@peterbloem.nl"},
+]
+description = "Implementations of attention models."
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["attention", "ai", "deep learning"]
+classifiers = [
+  "Programming Language :: Python"
+]
+
+[project.urls]
+Repository = "https://github.com/pbloem/attn-book.git"
