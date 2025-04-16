@@ -218,7 +218,7 @@ def make_batches(x_data, y_data, pad_token, batch_tokens):
     return batches
 
 def go(emb=300,
-       vocab=1_000,
+       vocab=None,
        epochs=3,
        batch_tokens=10_000,
        lr=3e-4, mixer='simple',
@@ -306,7 +306,7 @@ def tune_go(trial : optuna.Trial):
 
     return res['accuracy']
 
-def tune(trials=100):
+def tune(trials=100, name='unte-attention'):
 
     study = optuna.create_study(
         storage=f'sqlite:///db.sqlite3',  # Specify the storage URL here.
