@@ -143,7 +143,7 @@ def make_batches(x_data, y_data, pad_token, batch_tokens):
     assert sum(b[0].size(0) for b in batches) == len(x_data)
     return batches
 
-def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer=None, heads=4):
+def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer=None, ff=False, heads=4):
 
     print('Loading data. ', end='')
     (x_train, y_train), (x_val, y_val), (i2w, w2i), cls = load_imdb(final=False, char=False)
@@ -161,7 +161,7 @@ def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer=None, heads=4):
     else:
         mx = None
 
-    model = EmbeddingModel(v, emb, cls=cls, mixer=mx)
+    model = EmbeddingModel(v, emb, cls=cls, mixer=mx, ff=ff)
     if torch.cuda.is_available(): model.cuda()
 
     opt = torch.optim.Adam(lr=lr, params=model.parameters())
@@ -199,26 +199,36 @@ def go(emb=300, epochs=3, batch_tokens=10_000, lr=3e-4, mixer=None, heads=4):
 
     return {'accuracy' : correct/num}
 
-def tune_go(trial : optuna.Trial):
+def tune_go(trial : optuna.Trial, mixer):
 
     res = go(
-        epochs=1,
-        lr=trial.suggest_float('lr', 1e-5, 1e-1, log=True),
-        emb=trial.suggest_int('emb', low=1, high=1024, step=1, log=False)
+        epochs = 6,
+        lr = trial.suggest_float('lr', 1e-5, 1e-1, log=True),
+        emb = trial.suggest_categorical('emb', [16, 32, 64, 128, 256, 512]),
+        ff = trial.suggest_categorical('ff', [True, False]),
+        batch_tokens = 50_000,
+        heads = 4,
+        mixer = mixer
     )
 
     return res['accuracy']
 
-def tune(mixer=None):
-    study = optuna.create_study(
-        storage=f'sqlite:///db.sqlite3',  # Specify the storage URL here.
-        study_name=f'tune-{mixer}',
-        load_if_exists=True,
-        direction="maximize"
-    )
-    study.optimize(tune_go, n_trials=3 )
+def tune(mixers=['none', 'simple', 'mh'], trials=100):
 
-    print(study.best_params)
+    for mixer in mixers:
+
+        print('Trial with mixer:', mixer)
+        study = optuna.create_study(
+            storage=f'sqlite:///db.sqlite3',  # Specify the storage URL here.
+            study_name=f'tune-{mixer}',
+            load_if_exists=True,
+            direction="maximize",
+        )
+
+        study.optimize(lambda x : tune_go(x, mixer), n_trials=trials )
+
+        print(f'Finished ({mixer}). Result:')
+        print('\t', study.best_params)
 
 if __name__ == '__main__':
     fire.Fire()
