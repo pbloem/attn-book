@@ -298,7 +298,7 @@ def tune_go(trial : optuna.Trial):
         ff = trial.suggest_categorical('ff', [True, False]),
         pos = trial.suggest_categorical('pos', [True, False]),
         aux = trial.suggest_categorical('aux', [True, False]),
-        batch_tokens = 50_000,
+        batch_tokens = 3_000,
         heads = 4,
         mixer = trial.suggest_categorical('mixer', ['simple', 'mh']),
         layers = trial.suggest_categorical('layers', [0,1,2,3]),
